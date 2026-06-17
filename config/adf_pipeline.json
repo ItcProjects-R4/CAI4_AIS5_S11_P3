@@ -1,0 +1,315 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "comment": "Azure Data Factory pipeline for ITC Data Warehouse ETL. Import this via ADF Studio → Manage → ARM Template → Import.",
+
+    "resources": [
+        {
+            "name": "pl_itc_full_etl",
+            "type": "pipelines",
+            "properties": {
+                "description": "Full ETL pipeline: CSV ingestion → Blob → Azure SQL DW. Runs daily at 02:00 UTC.",
+                "activities": [
+
+                    {
+                        "name": "Copy CSV to Blob",
+                        "description": "Uploads the source CSV from local/SFTP to Azure Blob Storage landing zone.",
+                        "type": "Copy",
+                        "dependsOn": [],
+                        "policy": {
+                            "timeout": "01:00:00",
+                            "retry": 2,
+                            "retryIntervalInSeconds": 60
+                        },
+                        "typeProperties": {
+                            "source": {
+                                "type": "DelimitedTextSource",
+                                "storeSettings": {
+                                    "type": "AzureBlobStorageReadSettings",
+                                    "recursive": false
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextReadSettings",
+                                    "firstRowAsHeader": true
+                                }
+                            },
+                            "sink": {
+                                "type": "DelimitedTextSink",
+                                "storeSettings": {
+                                    "type": "AzureBlobStorageWriteSettings"
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextWriteSettings",
+                                    "quoteAllText": true,
+                                    "fileExtension": ".csv"
+                                }
+                            },
+                            "enableStaging": false
+                        },
+                        "inputs": [{
+                            "referenceName": "ds_source_csv",
+                            "type": "DatasetReference"
+                        }],
+                        "outputs": [{
+                            "referenceName": "ds_blob_landing",
+                            "type": "DatasetReference"
+                        }]
+                    },
+
+                    {
+                        "name": "Load Raw Layer",
+                        "description": "Copies CSV from Blob into raw.ecommerce_orders (all VARCHAR, append-only).",
+                        "type": "Copy",
+                        "dependsOn": [{
+                            "activity": "Copy CSV to Blob",
+                            "dependencyConditions": ["Succeeded"]
+                        }],
+                        "policy": {
+                            "timeout": "01:00:00",
+                            "retry": 1
+                        },
+                        "typeProperties": {
+                            "source": {
+                                "type": "DelimitedTextSource",
+                                "storeSettings": {
+                                    "type": "AzureBlobStorageReadSettings"
+                                },
+                                "formatSettings": {
+                                    "type": "DelimitedTextReadSettings",
+                                    "firstRowAsHeader": true
+                                }
+                            },
+                            "sink": {
+                                "type": "AzureSqlSink",
+                                "writeBehavior": "insert",
+                                "sqlWriterUseTableLock": true,
+                                "tableOption": "autoCreate"
+                            },
+                            "preCopyScript": "-- Optionally truncate raw table here for replace mode",
+                            "enableStaging": false,
+                            "parallelCopies": 4,
+                            "dataIntegrationUnits": 4
+                        },
+                        "inputs": [{
+                            "referenceName": "ds_blob_landing",
+                            "type": "DatasetReference"
+                        }],
+                        "outputs": [{
+                            "referenceName": "ds_sql_raw_orders",
+                            "type": "DatasetReference"
+                        }]
+                    },
+
+                    {
+                        "name": "Run Full ETL Stored Procedure",
+                        "description": "Calls dw.usp_run_full_etl which runs all dimension and fact loads in sequence.",
+                        "type": "SqlServerStoredProcedure",
+                        "dependsOn": [{
+                            "activity": "Load Raw Layer",
+                            "dependencyConditions": ["Succeeded"]
+                        }],
+                        "policy": {
+                            "timeout": "02:00:00",
+                            "retry": 1,
+                            "retryIntervalInSeconds": 300
+                        },
+                        "typeProperties": {
+                            "storedProcedureName": "[dw].[usp_run_full_etl]",
+                            "storedProcedureParameters": {
+                                "etl_load_id": {
+                                    "value": {
+                                        "value": "@pipeline().RunId",
+                                        "type": "Expression"
+                                    },
+                                    "type": "String"
+                                }
+                            }
+                        },
+                        "linkedServiceName": {
+                            "referenceName": "ls_azure_sql_dw",
+                            "type": "LinkedServiceReference"
+                        }
+                    },
+
+                    {
+                        "name": "Notify on Success",
+                        "description": "Sends an email or Teams notification on successful completion.",
+                        "type": "WebActivity",
+                        "dependsOn": [{
+                            "activity": "Run Full ETL Stored Procedure",
+                            "dependencyConditions": ["Succeeded"]
+                        }],
+                        "typeProperties": {
+                            "url": "https://prod-XX.eastus.logic.azure.com/...",
+                            "method": "POST",
+                            "headers": { "Content-Type": "application/json" },
+                            "body": {
+                                "value": "@concat('{\"status\":\"SUCCESS\",\"pipeline\":\"', pipeline().Pipeline, '\",\"runId\":\"', pipeline().RunId, '\",\"time\":\"', utcnow(), '\"}')",
+                                "type": "Expression"
+                            }
+                        }
+                    },
+
+                    {
+                        "name": "Notify on Failure",
+                        "description": "Sends failure notification if any upstream activity fails.",
+                        "type": "WebActivity",
+                        "dependsOn": [
+                            {
+                                "activity": "Run Full ETL Stored Procedure",
+                                "dependencyConditions": ["Failed"]
+                            },
+                            {
+                                "activity": "Load Raw Layer",
+                                "dependencyConditions": ["Failed"]
+                            }
+                        ],
+                        "typeProperties": {
+                            "url": "https://prod-XX.eastus.logic.azure.com/...",
+                            "method": "POST",
+                            "headers": { "Content-Type": "application/json" },
+                            "body": {
+                                "value": "@concat('{\"status\":\"FAILED\",\"pipeline\":\"', pipeline().Pipeline, '\",\"error\":\"', activity('Run Full ETL Stored Procedure').Error.message, '\"}')",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+
+                ],
+
+                "triggers": [
+                    {
+                        "name": "trigger_daily_02am",
+                        "type": "ScheduleTrigger",
+                        "properties": {
+                            "description": "Runs the full ETL daily at 02:00 UTC",
+                            "runtimeState": "Started",
+                            "pipelines": [{
+                                "pipelineReference": {
+                                    "referenceName": "pl_itc_full_etl",
+                                    "type": "PipelineReference"
+                                }
+                            }],
+                            "typeProperties": {
+                                "recurrence": {
+                                    "frequency": "Day",
+                                    "interval": 1,
+                                    "startTime": "2025-01-01T02:00:00Z",
+                                    "timeZone": "UTC",
+                                    "schedule": {
+                                        "hours": [2],
+                                        "minutes": [0]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+
+                "parameters": {
+                    "source_csv_path": {
+                        "type": "String",
+                        "defaultValue": "raw/ITC_ecommerce_2000_rows.csv"
+                    }
+                },
+
+                "annotations": [
+                    "ITC-DataWarehouse",
+                    "ETL",
+                    "Daily"
+                ]
+            }
+        },
+
+        {
+            "name": "LinkedServices",
+            "comment": "Define these in ADF Studio → Manage → Linked Services",
+            "services": {
+                "ls_azure_sql_dw": {
+                    "type": "AzureSqlDatabase",
+                    "description": "Connection to ITC_DataWarehouse Azure SQL Database",
+                    "typeProperties": {
+                        "server": "sql-itc-dw-server.database.windows.net",
+                        "database": "ITC_DataWarehouse",
+                        "authenticationType": "SQL",
+                        "userName": "itc_etl_user",
+                        "password": {
+                            "type": "AzureKeyVaultSecret",
+                            "store": { "referenceName": "ls_keyvault" },
+                            "secretName": "itc-etl-password"
+                        },
+                        "encrypt": true,
+                        "trustServerCertificate": false,
+                        "connectVia": {
+                            "referenceName": "AutoResolveIntegrationRuntime",
+                            "type": "IntegrationRuntimeReference"
+                        }
+                    }
+                },
+                "ls_azure_blob_storage": {
+                    "type": "AzureBlobStorage",
+                    "description": "Blob storage for landing zone (CSV files)",
+                    "typeProperties": {
+                        "accountName": "stgitcdatawarehouse",
+                        "accountKind": "StorageV2",
+                        "authenticationType": "AccountKey",
+                        "accountKey": {
+                            "type": "AzureKeyVaultSecret",
+                            "store": { "referenceName": "ls_keyvault" },
+                            "secretName": "storage-account-key"
+                        }
+                    }
+                },
+                "ls_keyvault": {
+                    "type": "AzureKeyVault",
+                    "description": "Key Vault for all secrets — never store credentials in ADF directly",
+                    "typeProperties": {
+                        "baseUrl": "https://kv-itc-datawarehouse.vault.azure.net/"
+                    }
+                }
+            }
+        },
+
+        {
+            "name": "Datasets",
+            "comment": "Define these in ADF Studio → Author → Datasets",
+            "datasets": {
+                "ds_blob_landing": {
+                    "type": "DelimitedText",
+                    "linkedServiceName": "ls_azure_blob_storage",
+                    "schema": [],
+                    "typeProperties": {
+                        "location": {
+                            "type": "AzureBlobStorageLocation",
+                            "container": "itc-landing",
+                            "folderPath": "raw"
+                        },
+                        "columnDelimiter": ",",
+                        "rowDelimiter": "\n",
+                        "encodingName": "UTF-8",
+                        "quoteChar": "\"",
+                        "firstRowAsHeader": true
+                    }
+                },
+                "ds_sql_raw_orders": {
+                    "type": "AzureSqlTable",
+                    "linkedServiceName": "ls_azure_sql_dw",
+                    "typeProperties": {
+                        "schema": "raw",
+                        "table": "ecommerce_orders"
+                    }
+                }
+            }
+        }
+    ],
+
+    "setup_instructions": {
+        "step1": "Create Azure Data Factory in Azure Portal → Create → Data Factory",
+        "step2": "Open ADF Studio → Manage → Linked Services → Create each ls_* above",
+        "step3": "Manage → Integration Runtimes → AutoResolve (default) is sufficient",
+        "step4": "Author → Pipelines → Import from ARM template → upload this JSON",
+        "step5": "Author → Triggers → pl_itc_full_etl → trigger_daily_02am → Publish",
+        "step6": "Monitor → Pipeline Runs to verify first execution",
+        "keyvault_note": "Store all passwords in Azure Key Vault before linking ADF to it. Never paste secrets directly into Linked Service connection strings."
+    }
+}

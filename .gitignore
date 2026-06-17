@@ -1,0 +1,78 @@
+# =============================================================================
+# .gitignore for ITC Data Warehouse project
+# CRITICAL: Never commit credentials, processed data, or local configs to Git.
+# =============================================================================
+
+# ── Credentials and secrets (NEVER commit these) ─────────────────────────────
+.env
+.env.*
+*.env
+config/secrets.yaml
+config/credentials.json
+secrets/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+.Python
+venv/
+env/
+.venv/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
+
+# ── Data files (can be large; store in blob storage instead) ──────────────────
+data/processed/
+data/raw/*.parquet
+*.parquet
+*.feather
+logs/
+
+# ── Keep the raw CSV (small — it's the project seed data)
+!data/raw/ITC_ecommerce_2000_rows.csv
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+etl/tests/tmp/
+
+# ── IDE and OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Azure artifacts ───────────────────────────────────────────────────────────
+.azure/
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ── Power BI ──────────────────────────────────────────────────────────────────
+*.pbix       # Large binary — store in SharePoint/OneDrive, not Git
+*.pbit       # Power BI template (OK to commit if <10 MB)
+
+# ── Keep these files tracked ──────────────────────────────────────────────────
+!etl/requirements.txt
+etl/config.py          # Config without passwords (passwords via env vars)
+!config/adf_pipeline.json
+!docs/*.md
+!sql/**/*.sql
+!README.md
+!.gitignore

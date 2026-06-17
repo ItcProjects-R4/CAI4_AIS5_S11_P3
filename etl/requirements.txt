@@ -1,0 +1,27 @@
+# =============================================================================
+# requirements.txt
+# Python dependencies for the ITC Data Warehouse ETL pipeline.
+# Install with: pip install -r requirements.txt
+# Python version: 3.9+ recommended
+# =============================================================================
+
+# ── Data manipulation ─────────────────────────────────────────────────────────
+pandas==2.2.2
+numpy==1.26.4
+pyarrow==16.0.0          # Parquet support for processed data archiving
+
+# ── Database connectivity ─────────────────────────────────────────────────────
+sqlalchemy==2.0.30        # ORM + connection pooling
+pyodbc==5.1.0             # ODBC driver for Azure SQL / SQL Server
+
+# ── Azure SDK (optional — for Key Vault secret loading) ──────────────────────
+azure-identity==1.16.0
+azure-keyvault-secrets==4.8.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1      # Load .env file for local development
+tqdm==4.66.4              # Progress bars for large data loads
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.2.0
+pytest-cov==5.0.0
