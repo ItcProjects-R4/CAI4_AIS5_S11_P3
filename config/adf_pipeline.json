@@ -1,7 +1,7 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
-    "comment": "Azure Data Factory pipeline for ITC Data Warehouse ETL. Import this via ADF Studio → Manage → ARM Template → Import.",
+    "comment": "Azure Data Factory pipeline for ITC Data Warehouse ETL. Modified to bypass Key Vault using SecureString.",
     "resources": [
         {
             "name": "pl_itc_full_etl",
@@ -253,11 +253,8 @@
                         "authenticationType": "SQL",
                         "userName": "itc_etl_user",
                         "password": {
-                            "type": "AzureKeyVaultSecret",
-                            "store": {
-                                "referenceName": "ls_keyvault"
-                            },
-                            "secretName": "itc-etl-password"
+                            "type": "SecureString",
+                            "value": "Super$ecret#2026A!"
                         },
                         "encrypt": true,
                         "trustServerCertificate": false,
@@ -271,23 +268,13 @@
                     "type": "AzureBlobStorage",
                     "description": "Blob storage for landing zone (CSV files)",
                     "typeProperties": {
-                        "accountName": "stgitcdatawarehouse",
+                        "accountName": "analyticsdatalakews",
                         "accountKind": "StorageV2",
                         "authenticationType": "AccountKey",
                         "accountKey": {
-                            "type": "AzureKeyVaultSecret",
-                            "store": {
-                                "referenceName": "ls_keyvault"
-                            },
-                            "secretName": "storage-account-key"
+                            "type": "SecureString",
+                            "value": "removed"
                         }
-                    }
-                },
-                "ls_keyvault": {
-                    "type": "AzureKeyVault",
-                    "description": "Key Vault for all secrets — never store credentials in ADF directly",
-                    "typeProperties": {
-                        "baseUrl": "https://kv-itc-datawarehouse.vault.azure.net/"
                     }
                 }
             }
@@ -340,14 +327,5 @@
                 }
             }
         }
-    ],
-    "setup_instructions": {
-        "step1": "Create Azure Data Factory in Azure Portal → Create → Data Factory",
-        "step2": "Open ADF Studio → Manage → Linked Services → Create each ls_* above",
-        "step3": "Manage → Integration Runtimes → AutoResolve (default) is sufficient",
-        "step4": "Author → Pipelines → Import from ARM template → upload this JSON",
-        "step5": "Author → Triggers → pl_itc_full_etl → trigger_daily_02am → Publish",
-        "step6": "Monitor → Pipeline Runs to verify first execution",
-        "keyvault_note": "Store all passwords in Azure Key Vault before linking ADF to it. Never paste secrets directly into Linked Service connection strings."
-    }
+    ]
 }
